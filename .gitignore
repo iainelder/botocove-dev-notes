@@ -1,0 +1,6 @@
+# Vale packaged styles.
+styles/*
+!styles/Vocab
+
+# Vim buffer.
+*.swp
