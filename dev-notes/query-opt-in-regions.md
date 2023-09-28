@@ -203,6 +203,10 @@ ClientError: An error occurred (AuthFailure) when calling the DescribeAvailabili
 
 Read a Knowledge Center article to get the answer: [Why did I receive the IAM error "AWS was not able to validate the provided access credentials" in some AWS Regions?](https://repost.aws/knowledge-center/iam-validate-access-credentials). It shows how to set the endpoint URL of the STS client to work with opt-in regions.
 
+This works as the CLI does. It gives `eu-central-2`.
+
+This is how Botocove needs to work too.
+
 ```python
 import boto3
 
