@@ -339,10 +339,72 @@ Pytest passes locally, but fails in the latest CI run ([#103](https://github.com
 
 The first failure is in `test_when_two_regions_are_passed_then_output_has_one_result_per_account_per_region` and is because of a `NoRegionError`.
 
+I'm not sure why pytest passed locally the first time around in pre-commit. When I run it again it fails in the same way. Use `pytest --ff -x` to rerun failures first and exit on the first failure.
+
+When I remove the `endpoint_url` parameter, all the tests pass.
+
+## Test regional endpoint support in moto
+
+Does moto support STS regional endpoints?
+
+Use the aws-sandbox environment but don't set a default profile.
+
+I think moto fails when the `AWS_DEFAULT_REGION` environment variable is unset.
+
+Set up functions to get the identity using default and regional endpoints.
+
+```python
+from boto3.session import Session
+from moto import mock_sts
+from unittest.mock import patch
+import os
+
+def default_identity():
+    sts_client = Session().client("sts")
+    return sts_client.get_caller_identity()
+
+def regional_identity():
+    sts_client = Session().client("sts", endpoint_url="https://sts.eu-west-1.amazonaws.com")
+    return sts_client.get_caller_identity()
+```
+
+These work except number 4. The mocked calls in 5 and 6 work because a region is set either from the profile or from the environment variable.
+
+```python
+with patch.dict(os.environ, {"AWS_PROFILE": "sandbox.Organization-Management-Account.480783779961.AdministratorAccess"}):
+    print(default_identity())
+
+with patch.dict(os.environ, {"AWS_PROFILE": "sandbox.Organization-Management-Account.480783779961.AdministratorAccess"}):
+    print(regional_identity())
+
+with patch.dict(os.environ, {}, clear=True), mock_sts():
+    print(default_identity())
+
+with patch.dict(os.environ, {}, clear=True), mock_sts():
+    print(regional_identity())
+
+with patch.dict(os.environ, {"AWS_DEFAULT_REGION": "eu-west-1"}, clear=True), mock_sts():
+    print(regional_identity())
+
+with patch.dict(os.environ, {"AWS_PROFILE": "sandbox.Organization-Management-Account.480783779961.AdministratorAccess"}), mock_sts():
+    print(regional_identity())
+```
+
+Number 4 fails with this error:
+
+```text
+NoRegionError: You must specify a region.
+```
+
+I can reproduce the error in number 2 if I delete the `region` key from the management profile and unset the `AWS_DEFAULT_REGION` environment variable.
+
+That suggests it's not because of moto at all but because of how boto3 3 behaves.
+
+If I set the `endpoint_url` in the STS client do I also have to set the `region_name`? In fact that's what the repost example shows.
 
 Next steps:
 
-* Debug the unit test. Why is it different in CI?
+* Figure out why I sometimes get the NoRegion error
 * Create a draft PR with the fix
 * Determine whether Moto can test this
 * If Moto can't test this, what about LocalStack?
