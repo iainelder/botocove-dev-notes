@@ -4,6 +4,30 @@ Alexandre Alencar points out in [issue 74](https://github.com/connelldave/botoco
 
 For a client project I need to query opt-in regions, so I want to solve this too.
 
+## Set up
+
+Use the sandbox organization management account.
+
+```bash
+.env aws-sandbox
+export AWS_PROFILE=sandbox.Organization-Management-Account.480783779961.AdministratorAccess
+```
+
+Install `cove_cli`:
+
+```bash
+tmp="$(mktemp --dir)"
+git clone https://github.com/iainelder/cove-cli.git "$tmp/cove-cli"
+python3 -m venv "$tmp/venv"
+source "$tmp/venv/bin/activate"
+python3 -m pip install --upgrade pip
+python3 -m pip install -e "$tmp/cove-cli"
+git -C "$tmp/cove-cli" switch add-options
+cove_cli --help
+```
+
+## Solve the problem in boto3
+
 The Sandbox member accounts have no enabled opt-in regions.
 
 ```bash
@@ -231,9 +255,94 @@ member = boto3.Session(
 member.client("ec2").describe_availability_zones()["AvailabilityZones"][0]["RegionName"]
 ```
 
+## Solve the problem in botocove
+
+Before I create a GitHub issue in the Botocove repo I need to create repro using the Botocove library.
+
+```python
+from botocove import cove
+from itertools import chain
+
+response = cove(
+    lambda s: (
+        s.client("ec2").describe_availability_zones()
+        ["AvailabilityZones"][0]["RegionName"]
+    ),
+    target_ids=["483535468253"],
+    regions=["eu-central-1", "eu-central-2"]
+)()
+
+for result in chain(
+            response["FailedAssumeRole"],
+            response["Exceptions"],
+            response["Results"],
+        ):
+    print(
+        repr(
+            {
+                k: v
+                for k, v in result.items()
+                if k in {"Id", "Region", "Result", "ExceptionDetails"}
+            }
+        )
+    )
+```
+
+Region `eu-central-1` echoes its name and region `eu-central-2` gives an `AuthFailure` error.
+
+```python
+{'Id': '483535468253', 'Region': 'eu-central-2', 'ExceptionDetails': ClientError('An error occurred (AuthFailure) when calling the DescribeAvailabilityZones operation: AWS was not able to validate the provided access credentials')}
+{'Id': '483535468253', 'Region': 'eu-central-1', 'Result': 'eu-central-1'}
+```
+
+Use botocove as a convenient way to check the opt-in status of the target regions. You can use the `Accounts.ListRegions` API but you first need to enable trusted access in the organization.
+
+```python
+response = cove(
+    lambda s: s.client("account").list_regions(), target_ids=["483535468253"]
+)()
+
+[
+    r
+    for r in response["Results"][0]["Result"]["Regions"]
+    if r["RegionName"] in {"eu-central-1", "eu-central-2"}
+]
+```
+
+```python
+[{'RegionName': 'eu-central-1', 'RegionOptStatus': 'ENABLED_BY_DEFAULT'},
+ {'RegionName': 'eu-central-2', 'RegionOptStatus': 'ENABLED'}]
+```
+
+## Create an issue
+
+Create [issue 77](https://github.com/connelldave/botocove/issues/77) in the botocove repo.
+
+## Fix it in botocove
+
+Now use the botocove repo for the tests so that I can fix the code directly.
+
+Stay in the Sandbox organization management account. Leave the virtualenv and go to the botocove working copy.
+
+I refactor the session and client initializers to make them easier to read. Then I set the `endpoint_url` in the STS client.
+
+The repro program now gives the expected result.
+
+```python
+{'Id': '483535468253', 'Region': 'eu-central-2', 'Result': 'eu-central-2'}
+{'Id': '483535468253', 'Region': 'eu-central-1', 'Result': 'eu-central-1'}
+```
+
+I commit 02a0567a58ea8a00cdc39e829821c73a61863626 with the fix.
+
+Pytest passes locally, but fails in the latest CI run ([#103](https://github.com/iainelder/botocove/actions/runs/6448602367/job/17506051971)).
+
+The first failure is in `test_when_two_regions_are_passed_then_output_has_one_result_per_account_per_region` and is because of a `NoRegionError`.
+
+
 Next steps:
 
-* Create an issue on GitHub to track this
+* Debug the unit test. Why is it different in CI?
 * Create a draft PR with the fix
 * Determine whether Moto can test this
 * If Moto can't test this, what about LocalStack?

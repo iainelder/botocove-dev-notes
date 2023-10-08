@@ -5,6 +5,7 @@ Connell
 dev
 flakeheaven
 importlib
+initializer
 isort
 moto
 mypy
