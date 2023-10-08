@@ -2,5 +2,11 @@ Alencar
 Alexandre
 botocove
 dev
+flakeheaven
+importlib
+isort
 moto
+mypy
+pytest
 repo
+virtualenv
