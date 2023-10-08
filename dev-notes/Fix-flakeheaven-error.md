@@ -341,3 +341,37 @@ With this constraint Poetry installs all the dependencies.
 ## Prepare PR
 
 See [PR 78](https://github.com/connelldave/botocove/pull/78).
+
+## Share workaround
+
+Until Dave Connell merges the PR I can use this command on another branch to install a working version of flakeheaven.
+
+```bash
+bash -c '
+    set -e
+    rm -rf poetry.lock "$(poetry env info --path)"
+    poetry install
+    poetry update flakeheaven
+    pre-commit run flakeheaven --all-files
+'
+```
+
+The last two commands give this output:
+
+```text
+Updating dependencies
+Resolving dependencies... (2.4s)
+
+Package operations: 0 installs, 7 updates, 0 removals
+
+  • Downgrading mccabe (0.7.0 -> 0.6.1)
+  • Downgrading pycodestyle (2.9.1 -> 2.8.0)
+  • Downgrading pyflakes (2.5.0 -> 2.4.0)
+  • Downgrading flake8 (5.0.4 -> 4.0.1)
+  • Downgrading flake8-eradicate (1.5.0 -> 1.4.0)
+  • Updating flakeheaven (0.11.0 -> 3.3.0)
+  • Downgrading pep8-naming (0.13.3 -> 0.13.2)
+
+Writing lock file
+flakeheaven..............................................................Passed
+```

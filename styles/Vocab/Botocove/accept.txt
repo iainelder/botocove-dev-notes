@@ -1,6 +1,7 @@
 Alencar
 Alexandre
 botocove
+Connell
 dev
 flakeheaven
 importlib
