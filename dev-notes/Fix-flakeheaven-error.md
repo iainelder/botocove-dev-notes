@@ -375,3 +375,11 @@ Package operations: 0 installs, 7 updates, 0 removals
 Writing lock file
 flakeheaven..............................................................Passed
 ```
+
+## Merge PR
+
+Dave Connell merged the PR.
+
+He supports migrating to Ruff.
+
+I'd check first whether we can use flake8 6 without flakeheaven.
