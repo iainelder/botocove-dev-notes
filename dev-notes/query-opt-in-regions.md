@@ -402,9 +402,115 @@ That suggests it's not because of moto at all but because of how boto3 3 behaves
 
 If I set the `endpoint_url` in the STS client do I also have to set the `region_name`? In fact that's what the repost example shows.
 
+## Dig into the NoRegion error
+
+```python
+from boto3.session import Session
+from unittest.mock import patch
+import os
+from moto import mock_sts
+from contextlib import contextmanager
+from typing import Dict
+
+
+@contextmanager
+def tmpenv(env: Dict[str, str]) -> None:
+    yield patch.dict(os.environ, {}, clear=True)
+
+
+def identity(*args, **kwargs):
+    sts = Session().client("sts", *args, **kwargs)
+    print(sts.get_caller_identity()["Account"])
+
+
+# NoCredentialsError: Unable to locate credentials.
+with tmpenv({}):
+    identity()
+
+
+# NoRegionError: You must specify a region.
+with tmpenv({}):
+    identity(endpoint_url="https://sts.us-east-1.amazonaws.com")
+
+
+# NoCredentialsError: Unable to locate credentials
+with tmpenv({}):
+   identity(
+        endpoint_url="https://sts.us-east-1.amazonaws.com",
+        region_name="us-east-1",
+    )
+
+# 123456789012
+with tmpenv({}), mock_sts():
+    identity(
+        endpoint_url="https://sts.us-east-1.amazonaws.com",
+        region_name="us-east-1",
+    )
+
+# NoRegionError: You must specify a region.
+with tmpenv({}), mock_sts():
+    identity(endpoint_url="https://sts.us-east-1.amazonaws.com")
+
+
+# NoRegionError: You must specify a region.
+with tmpenv({}), mock_sts():
+    identity(
+        endpoint_url=f"https://sts.{None}.amazonaws.com",
+        region_name=None,
+    )
+```
+
+I think it's the case with `None` that triggers the strange behavior in the unit tests.
+
+## Review branch to fix assuming session bug
+
+I seem to have known about an "assuming session bug" since 2022-04 (see VWAG 2022-03 work diary).
+
+Review the almost-forgotten branch `fix-assuming-session-region`. It appears to address this bug, but it doesn't include a repro so I'm not sure what it is supposed to fix. Maybe the unit tests cover it.
+
+I created the branch around 2023-06. My `Homegate-Organization.md` note from that time says to "Set the assuming session for botocove using environment variables to avoid a bug in single-region mode."
+
+It suggests to set the assuming session like this in Python code:
+
+```python
+os.environ["AWS_PROFILE"] = "Profile1"
+os.environ["AWS_DEFAULT_REGION"] = "eu-central-1"
+
+@cove()
+def check(session: Session):
+    return session.client("sts").get_caller_identity()
+```
+
+Rather than something like this:
+
+```python
+    @cove(
+        assuming_session=Session(
+            profile_name="Profile1",
+            region_name="eu-central-1",
+        ),
+        rolename=role_name
+    )
+    def check(session):
+        return session.client("sts").get_caller_identity()
+```
+
+I set `assuming_session` a lot in my analyses before 2023. I might find some error examples if I dig through old notes.
+
+On insight from that branch is that the `do_nothing` function in the unit tests is ineffective because it, well, does nothing to exercise the session or client.
+
+Replace it with a function that calls a regional endpoint. In the branch I used an SQS API because it's a simple regional API.
+
+Revive the `test_assuming_session.py` test module from the branch.
+
+The tests expose two bugs. I had to mark the tests as `xfail` to commit them.
+
+Before I add the regional STS feature, I need to fix these bugs.
+
+---
+
 Next steps:
 
-* Figure out why I sometimes get the NoRegion error
 * Create a draft PR with the fix
 * Determine whether Moto can test this
 * If Moto can't test this, what about LocalStack?
