@@ -688,9 +688,168 @@ But it should output this:
 
 What are the older tests doing to mess it up like this?
 
-## Improve support for opt-in regions
+## Check how moto works without AWS context
+
+On my local computer, there are no `AWS` environment variables. The following returns `{}`.
+
+```python
+import os
+{k: v for k, v in os.environ.items() if "AWS" in k}
+```
+
+The CoveHostAccount invokes STS and Organizations before running the cove function. Those services both are "global" services in the sense that they work without setting a region in the context. I use the EC2 service in new tests as a simple regional API.
+
+```python
+from boto3.session import Session
+from moto import mock_sts, mock_organizations, mock_ec2
+```
+
+Moto's version of `STS.GetCallerIdentity` succeeds.
+
+```python
+mm = mock_sts().__enter__()
+Session().client("sts").get_caller_identity()
+```
+
+```python
+{'UserId': 'AKIAIOSFODNN7EXAMPLE',
+ 'Account': '123456789012',
+ 'Arn': 'arn:aws:sts::123456789012:user/moto',
+ 'ResponseMetadata': {'RequestId': 'c6104cbe-af31-11e0-8154-cbc7ccf896c7',
+  'HTTPStatusCode': 200,
+  'HTTPHeaders': {'server': 'amazon.com',
+   'date': 'Sun, 22 Oct 2023 11:11:35 GMT'},
+  'RetryAttempts': 0}}
+```
+
+The unpatched API raises a `NoCredentialsError`.
+
+```python
+mm.__exit__()
+Session().client("sts").get_caller_identity()
+```
+
+```text
+NoCredentialsError: Unable to locate credentials
+```
+
+Moto's version of `Organizations.DescribeOrganization`, although it raises `AWSOrganizationsNotInUseException`, succeeds because that service would respond with that error when no organization exists.
+
+```python
+mm = mock_organizations().__enter__()
+Session().client("organizations").describe_organization()
+```
+
+```text
+AWSOrganizationsNotInUseException: An error occurred (AWSOrganizationsNotInUseException) when calling the DescribeOrganization operation: Your account is not a member of an organization.
+```
+
+The unpatched SDK raises `NoCredentialsError`.
+
+```python
+mm.__exit__()
+Session().client("organizations").describe_organization()
+```
+
+```text
+NoCredentialsError: Unable to locate credentials
+```
+
+Moto's version of `EC2.DescribeAvailabilityZones` raises a `NoRegionError`.
+
+```python
+mm = mock_ec2().__enter__()
+Session().client("ec2").describe_availability_zones()
+```
+
+```text
+NoRegionError: You must specify a region.
+```
+
+The unpatched SDK matches Moto's behavior.
+
+```python
+mm.__exit__()
+Session().client("ec2").describe_availability_zones()
+```
+
+```text
+NoRegionError: You must specify a region.
+```
+
+So Moto doesn't care about credentials but does care about regions.
+
+## Find functions that call `do_nothing`
+
+I suspect the tests that call `do_nothing` are why I haven't noticed this till now.
+
+`ack` doesn't match line ranges, so use `awk`.
+
+Had to learn some new tricks to do this:
+
+* [Print range if start and end match](https://unix.stackexchange.com/questions/456843/print-data-between-two-lines-only-if-range-end-exists-from-a-text-file)
+* [Assign a here-document to a variable](https://stackoverflow.com/questions/1167746/how-to-assign-a-heredoc-value-to-a-variable-in-bash)
+* [Assign `printf` output to variable](https://stackoverflow.com/questions/48953008/assigning-printf-output-to-a-variable-in-awk-command)
+
+```bash
+read -r -d $'\0' prog <<"EOF"
+function present_as_ack() { return sprintf("%s:%s:%s", FILENAME, NR, $0) }
+/^def test_/       { hold = present_as_ack(); next }
+                   { hold = hold ORS present_as_ack() }
+/def do_nothing\(/ { print hold }
+EOF
+
+find tests -type f -name '*.py' -exec awk "$prog" '{}' +
+```
+
+The output looks like `ack` for a range match.
+
+```text
+tests/test_regions.py:724:def test_when_region_is_unspecified_then_result_has_no_region_key(
+tests/test_regions.py:725:    mock_small_org: SmallOrg,
+tests/test_regions.py:726:) -> None:
+tests/test_regions.py:727:    @cove()
+tests/test_regions.py:728:    def do_nothing(session: Session) -> None:
+tests/test_regions.py:737:def test_when_region_is_unspecified_then_output_has_one_result_per_account(
+tests/test_regions.py:738:    mock_session: Session, mock_small_org: SmallOrg
+tests/test_regions.py:739:) -> None:
+tests/test_regions.py:740:    @cove()
+tests/test_regions.py:741:    def do_nothing(session: Session) -> None:
+```
+
+Change the `awk` program to output just the first line of the matched range. That's all I need to find the test functions. Just remove the block that adds to the hold space.
+
+```bash
+read -r -d $'\0' prog <<"EOF"
+function present_as_ack() { return sprintf("%s:%s:%s", FILENAME, NR, $0) }
+/^def test_/       { hold = present_as_ack(); next }
+/def do_nothing\(/ { print hold }
+EOF
+
+find tests -type f -name '*.py' -exec awk "$prog" '{}' +
+```
+
+Now I can see all the test functions at a glance.
+
+```text
+tests/test_regions.py:724:def test_when_region_is_unspecified_then_result_has_no_region_key(
+tests/test_regions.py:737:def test_when_region_is_unspecified_then_output_has_one_result_per_account(
+tests/test_regions.py:752:def test_when_region_is_str_then_raises_type_error(mock_small_org: SmallOrg) -> None:
+tests/test_regions.py:763:def test_when_region_is_empty_then_raises_value_error(mock_small_org: SmallOrg) -> None:
+tests/test_regions.py:774:def test_when_any_region_is_passed_then_result_has_region_key(
+tests/test_regions.py:787:def test_when_two_regions_are_passed_then_output_has_one_result_per_account_per_region(
+tests/test_target_ids.py:817:def test_when_unspecified_then_output_has_a_result_for_each_org_account(
+tests/test_target_ids.py:828:def test_when_accounts_in_org_then_output_has_result_for_each_target_id(
+tests/test_target_ids.py:844:def test_when_target_id_is_str_then_raises_type_error(mock_small_org: SmallOrg) -> None:
+tests/test_target_ids.py:855:def test_when_account_not_in_org_raises_value_error(
+tests/test_target_ids.py:871:def test_when_empty_sequence_raises_value_error(
+```
+
+## Make all the tests do something
 
 TODO
+
+---
 
 Next steps:
 
