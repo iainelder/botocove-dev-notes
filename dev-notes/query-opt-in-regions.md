@@ -507,11 +507,194 @@ The tests expose two bugs. I had to mark the tests as `xfail` to commit them.
 
 Before I add the regional STS feature, I need to fix these bugs.
 
----
+## Fix assuming region bug
+
+2023-10-21.
+
+The "bugs" exposed by my tests around the SQS API were in fact caused by my failure to mock the SQS service! I fixed it by adding `@mock_sqs` to `_call_regional_api`.
+
+(Later I swap out SQS for EC2, but the point is the same: I need to mock all the services.)
+
+Fix the assuming session bug! Now when the assuming session has a region and the default region is unset, cove uses the assuming session's region.
+
+## Add support for opt-in regions
+
+Now I am ready to add support for opt-in regions.
+
+How can I test the opt-in region behavior using Moto?
+
+Check the regions in the service model and count the availability zones.
+
+```python
+from moto import mock_sts, mock_ec2
+from boto3.session import Session
+from botocore.exceptions import ClientError
+from pprint import pprint
+
+
+def count_AZs(session, region):
+    try:
+        AZs = session.client("ec2", region_name=region).describe_availability_zones()[
+            "AvailabilityZones"
+        ]
+        return len(AZs)
+    except ClientError as error:
+        if error.response["Error"]["Code"] == "AuthFailure":
+            return None
+        raise
+
+
+def count_AZs_for_all_regions(session):
+    regions = session.get_available_regions(service_name="ec2")
+    return {r: count_AZs(session, r) for r in regions}
+
+
+def display(name, azs_per_region):
+    pprint(name)
+    pprint(len(azs_per_region))
+    pprint(azs_per_region)
+
+
+with mock_sts(), mock_ec2():
+    display("Moto", count_AZs_for_all_regions(Session()))
+
+display("Sandbox", count_AZs_for_all_regions(Session()))
+```
+
+My Boto3 version is 1.28.68. Its service model has 28 regions. The [EC2 Regions and Zones](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html) page lists also 28 regions. (It sorts the regions in americabetical order.)
+
+The [AWS global infrastructure](https://aws.amazon.com/about-aws/global-infrastructure/) advertises 32 launched regions. The other 4 are 2 China regions and 2 US GovCloud regions.
+
+Moto doesn't model opt-in regions. All regions act enabled and give a count of availability zones. Some regions have 0 availability zones.
+
+```python
+'Moto'
+28
+{'af-south-1': 3,
+ 'ap-east-1': 3,
+ 'ap-northeast-1': 3,
+ 'ap-northeast-2': 4,
+ 'ap-northeast-3': 3,
+ 'ap-south-1': 3,
+ 'ap-south-2': 0,
+ 'ap-southeast-1': 3,
+ 'ap-southeast-2': 3,
+ 'ap-southeast-3': 3,
+ 'ap-southeast-4': 0,
+ 'ca-central-1': 3,
+ 'eu-central-1': 3,
+ 'eu-central-2': 0,
+ 'eu-north-1': 3,
+ 'eu-south-1': 3,
+ 'eu-south-2': 0,
+ 'eu-west-1': 3,
+ 'eu-west-2': 3,
+ 'eu-west-3': 3,
+ 'il-central-1': 0,
+ 'me-central-1': 0,
+ 'me-south-1': 3,
+ 'sa-east-1': 3,
+ 'us-east-1': 6,
+ 'us-east-2': 3,
+ 'us-west-1': 2,
+ 'us-west-2': 4}
+```
+
+The Sandbox management account has no enabled opt-in regions. `None` indicates a disabled opt-in region.
+
+```python
+'Sandbox'
+28
+{'af-south-1': None,
+ 'ap-east-1': None,
+ 'ap-northeast-1': 3,
+ 'ap-northeast-2': 4,
+ 'ap-northeast-3': 3,
+ 'ap-south-1': 3,
+ 'ap-south-2': None,
+ 'ap-southeast-1': 3,
+ 'ap-southeast-2': 3,
+ 'ap-southeast-3': None,
+ 'ap-southeast-4': None,
+ 'ca-central-1': 3,
+ 'eu-central-1': 3,
+ 'eu-central-2': None,
+ 'eu-north-1': 3,
+ 'eu-south-1': None,
+ 'eu-south-2': None,
+ 'eu-west-1': 3,
+ 'eu-west-2': 3,
+ 'eu-west-3': 3,
+ 'il-central-1': None,
+ 'me-central-1': None,
+ 'me-south-1': None,
+ 'sa-east-1': 3,
+ 'us-east-1': 6,
+ 'us-east-2': 3,
+ 'us-west-1': 2,
+ 'us-west-2': 4}
+```
+
+In the sandbox this `Account.ListRegions` call returns `[]`.
+
+Moto fails with this error: `ClientError: An error occurred (UnrecognizedClientException) when calling the ListRegions operation: The security token included in the request is invalid.`
+
+(Moto's [IMPLEMENTATION_COVERAGE.md](https://github.com/getmoto/moto/blob/531fdc7851ad1fa259c6298596343d6589f206ad/IMPLEMENTATION_COVERAGE.md) doesn't even list the `account` service yet, so the support seems a long way off.)
+
+```python
+with mock_sts(), mock_ec2():
+    enabled_regions = Session().client("account").list_regions(
+        RegionOptStatusContains=["ENABLED"], MaxResults=50
+    )["Regions"]
+    pprint(enabled_regions)
+
+enabled_regions = Session().client("account").list_regions(
+    RegionOptStatusContains=["ENABLED"], MaxResults=50
+)["Regions"]
+pprint(enabled_regions)
+```
+
+For now I accept that there is no unit test coverage for the opt-in regions. It's good enough that the opt-in region support passes the existing unit tests and passes the test in a real organization described in the GitHub issue (see above section "[Solve the problem in Botocove](#solve-the-problem-in-botocove)").
+
+Use the solution from the linked repost article.
+
+Before fix:
+
+```python
+{'Id': '483535468253', 'Region': 'eu-central-2', 'ExceptionDetails': ClientError('An error occurred (AuthFailure) when calling the DescribeAvailabilityZones operation: AWS was not able to validate the provided access credentials')}
+{'Id': '483535468253', 'Region': 'eu-central-1', 'Result': 'eu-central-1'}
+```
+
+After fix:
+
+```python
+{'Id': '483535468253', 'Region': 'eu-central-1', 'Result': 'eu-central-1'}
+{'Id': '483535468253', 'Region': 'eu-central-2', 'Result': 'eu-central-2'}
+```
+
+I need to put a branch on the assuming session region name to make the existing tests pass. I don't like this. I don't think the branch is necessary for real use cases. In fact it breaks the real single-region use case because now cove outputs the `Region` key. None of the existing tests catch that. Run the GitHub issue code and comment out the `regions` parameter to see.
+
+It outputs this:
+
+```python
+{'Id': '483535468253', 'Region': 'eu-central-1', 'Result': 'eu-central-1'}
+```
+
+But it should output this:
+
+```python
+{'Id': '483535468253', 'Result': 'eu-central-1'}
+```
+
+What are the older tests doing to mess it up like this?
+
+## Improve support for opt-in regions
+
+TODO
 
 Next steps:
 
+* Improve the implementation (see above)
 * Create a draft PR with the fix
-* Determine whether Moto can test this
-* If Moto can't test this, what about LocalStack?
+* Moto can't test opt-in regions. What about LocalStack?
 * If LocalStack can't test this, what about a dedicated test organization?
