@@ -845,9 +845,22 @@ tests/test_target_ids.py:855:def test_when_account_not_in_org_raises_value_error
 tests/test_target_ids.py:871:def test_when_empty_sequence_raises_value_error(
 ```
 
-## Make all the tests do something
+## Fix all the tests
 
-TODO
+I updated all those tests above.
+
+The version 2 tokens had knock-on effects on all the test code. I had to add at least a default region fixture to most of  the modules.
+
+I took the opportunity to delete broken testing of internals. Tests should cover the public interface and behavior.
+
+It's quite a big change now, so sleep on it and review and refactor later.
+
+```console
+$ git diff --shortstat query-opt-in-regions master
+ 14 files changed, 330 insertions(+), 181 deletions(-)
+```
+
+Consider splitting the PR into two. It may actually be the prerequisite bug fix that requires those test changes rather than the version 2 token support itself.
 
 ---
 
