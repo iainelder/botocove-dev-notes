@@ -862,6 +862,14 @@ $ git diff --shortstat query-opt-in-regions master
 
 Consider splitting the PR into two. It may actually be the prerequisite bug fix that requires those test changes rather than the version 2 token support itself.
 
+## Submit PR
+
+Create [PR 79](https://github.com/connelldave/botocove/pull/79).
+
+Offer to split it into two PRs if it makes the changes clearer.
+
+Await feedback from Dave Connell.
+
 ---
 
 Next steps:
