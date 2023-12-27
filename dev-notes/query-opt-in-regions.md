@@ -870,6 +870,18 @@ Offer to split it into two PRs if it makes the changes clearer.
 
 Await feedback from Dave Connell.
 
+## Catch up
+
+2023-12-27.
+
+I closed PR 79 because it was too big to review and I didn't even understand all the changes. Dave Connell suggested that I break it up into multiple PRs to make it easier to follow.
+
+Dave Connell merged [PR 80](https://github.com/connelldave/botocove/pull/80), which simplifies the host account initialization.
+
+Now I work on fixing the elusive assuming session bug.
+
+Push new branch fix-assuming-session-bugs to start to address this. It's been so long I've forgotten what I wrote above.
+
 ---
 
 Next steps:
