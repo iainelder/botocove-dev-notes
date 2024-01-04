@@ -882,11 +882,35 @@ Now I work on fixing the elusive assuming session bug.
 
 Push new branch fix-assuming-session-bugs to start to address this. It's been so long I've forgotten what I wrote above.
 
----
+## Revisit NoRegionError
 
-Next steps:
+2023-12-29.
 
-* Improve the implementation (see above)
-* Create a draft PR with the fix
-* Moto can't test opt-in regions. What about LocalStack?
-* If LocalStack can't test this, what about a dedicated test organization?
+Reread this sections.
+
+> So Moto doesn't care about credentials but does care about regions.
+
+The tests that `do_nothing` hide the buggy region handling.
+
+Don't change that yet. It needs a deeper refactor.
+
+## Submit PR for assuming region
+
+2023-12-29.
+
+https://github.com/connelldave/botocove/pull/84
+
+## Next steps:
+
+Moto can't test opt-in regions. What about LocalStack?
+
+If LocalStack can't test this, what about a dedicated test organization?
+
+Refactor or delete all the tests that check complete outputs instead of just a feature. These break every time a feature changes. It's unclear what they cover.
+
+* `test_decorator_no_args`
+* tests/test_decorator.py::test_decorated_simple_func_passed_args
+* tests/test_session.py::test_session_result_formatter
+* tests/test_session.py::test_session_result_formatter_with_policy_arn
+* tests/test_session.py::test_session_result_formatter_with_policy
+* tests/test_exceptions.py::test_handled_exception_in_wrapped_func
